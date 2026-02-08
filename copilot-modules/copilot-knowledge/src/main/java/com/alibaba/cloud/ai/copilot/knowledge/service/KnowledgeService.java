@@ -129,6 +129,18 @@ public class KnowledgeService {
     }
 
     /**
+     * 搜索配置文件
+     *
+     * @param userId 用户ID
+     * @param query  查询文本
+     * @param topK   返回结果数量
+     * @return 搜索结果列表
+     */
+    public List<Document> searchConfig(String userId, String query, int topK) {
+        return searchByFileType(userId, query, KnowledgeCategory.FileType.CONFIG, topK);
+    }
+
+    /**
      * 获取搜索结果的内容列表
      *
      * @param documents 搜索结果
