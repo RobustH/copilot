@@ -47,6 +47,11 @@ copilot:
     default-max-depth: 5
     # 最大目录文件数
     max-directory-files: 100
+    # 文档切割器配置
+    splitter:
+      chunk-size: 2000        # 每个块的最大 Token 数
+      chunk-overlap: 400      # 块之间的重叠 Token 数
+      min-chunk-size: 100     # 最小块大小
     # 默认忽略模式
     default-ignore-patterns:
       - node_modules
