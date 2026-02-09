@@ -1,4 +1,7 @@
-package com.alibaba.cloud.ai.copilot.knowledge.splitter;
+package com.alibaba.cloud.ai.copilot.knowledge.splitter.impl;
+
+import com.alibaba.cloud.ai.copilot.knowledge.splitter.DocumentSplitter;
+import com.alibaba.cloud.ai.copilot.knowledge.splitter.SplitterStrategy;
 
 import com.alibaba.cloud.ai.copilot.knowledge.classifier.FileTypeClassifier;
 import com.alibaba.cloud.ai.copilot.knowledge.model.KnowledgeCategory;
@@ -85,5 +88,10 @@ public class TokenDocumentSplitter implements DocumentSplitter {
 
         log.debug("文档已切割为 {} 个知识块: {}", chunks.size(), filePath);
         return chunks;
+    }
+
+    @Override
+    public SplitterStrategy getStrategy() {
+        return SplitterStrategy.TOKEN;
     }
 }

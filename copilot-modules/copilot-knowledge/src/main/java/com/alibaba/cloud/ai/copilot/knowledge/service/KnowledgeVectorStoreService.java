@@ -1,6 +1,5 @@
 package com.alibaba.cloud.ai.copilot.knowledge.service;
 
-import com.alibaba.cloud.ai.copilot.knowledge.classifier.FileTypeClassifier;
 import com.alibaba.cloud.ai.copilot.knowledge.model.KnowledgeCategory;
 import com.alibaba.cloud.ai.copilot.knowledge.model.KnowledgeChunk;
 import lombok.RequiredArgsConstructor;
@@ -27,7 +26,6 @@ import java.util.stream.Collectors;
 public class KnowledgeVectorStoreService {
 
     private final VectorStore vectorStore;
-    private final FileTypeClassifier fileTypeClassifier;
 
     /**
      * 添加知识块到向量库

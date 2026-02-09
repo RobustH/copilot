@@ -1,17 +1,18 @@
 package com.alibaba.cloud.ai.copilot.knowledge.classifier;
 
 import com.alibaba.cloud.ai.copilot.knowledge.model.KnowledgeCategory;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 
 import java.util.Map;
 import java.util.Set;
 
 /**
  * 文件类型分类器
+ * 根据文件扩展名识别文件类型和编程语言
  *
  * @author RobustH
  */
-@Service
+@Component
 public class FileTypeClassifier {
 
     // 代码文件扩展名

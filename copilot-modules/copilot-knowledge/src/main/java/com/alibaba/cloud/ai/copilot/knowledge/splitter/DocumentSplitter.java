@@ -20,4 +20,11 @@ public interface DocumentSplitter {
      * @return 知识块列表
      */
     List<KnowledgeChunk> split(String content, String filePath);
+
+    /**
+     * 获取该切割器对应的策略类型
+     *
+     * @return 切割策略
+     */
+    SplitterStrategy getStrategy();
 }
