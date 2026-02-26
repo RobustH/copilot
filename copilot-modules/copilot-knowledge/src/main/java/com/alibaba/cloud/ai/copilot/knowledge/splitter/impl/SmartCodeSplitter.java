@@ -1,9 +1,9 @@
 package com.alibaba.cloud.ai.copilot.knowledge.splitter.impl;
 
+import com.alibaba.cloud.ai.copilot.knowledge.enums.SplitterStrategy;
 import com.alibaba.cloud.ai.copilot.knowledge.splitter.DocumentSplitter;
-import com.alibaba.cloud.ai.copilot.knowledge.splitter.SplitterStrategy;
 
-import com.alibaba.cloud.ai.copilot.knowledge.model.KnowledgeChunk;
+import com.alibaba.cloud.ai.copilot.knowledge.domain.vo.KnowledgeChunk;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;

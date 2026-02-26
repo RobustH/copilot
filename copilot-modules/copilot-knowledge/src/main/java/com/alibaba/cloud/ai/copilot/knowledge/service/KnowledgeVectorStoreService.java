@@ -1,7 +1,7 @@
 package com.alibaba.cloud.ai.copilot.knowledge.service;
 
-import com.alibaba.cloud.ai.copilot.knowledge.model.KnowledgeCategory;
-import com.alibaba.cloud.ai.copilot.knowledge.model.KnowledgeChunk;
+import com.alibaba.cloud.ai.copilot.knowledge.enums.KnowledgeCategory;
+import com.alibaba.cloud.ai.copilot.knowledge.domain.vo.KnowledgeChunk;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
@@ -52,14 +52,17 @@ public class KnowledgeVectorStoreService {
      * 搜索相关知识
      */
     public List<Document> searchKnowledge(String userId, String query, int topK) {
+        log.info("执行向量搜索: userId={}, query={}, topK={}", userId, query, topK);
         SearchRequest request = SearchRequest.builder()
                 .query(query)
                 .topK(topK)
-                .similarityThreshold(0.5)  // 降低阈值以提高召回率
+                .similarityThreshold(0.3)
                 .filterExpression(String.format("user_id == '%s'", userId))
                 .build();
 
-        return vectorStore.similaritySearch(request);
+        List<Document> results = vectorStore.similaritySearch(request);
+        log.info("向量搜索结束: userId={}, 返回{}=条结果", userId, results.size());
+        return results;
     }
 
     /**
@@ -88,28 +91,89 @@ public class KnowledgeVectorStoreService {
     }
 
     /**
+     * 删除指定文件的所有知识 (用于更新文件时清理旧数据)
+     */
+    public void deleteKnowledgeByFilePath(String userId, String filePath) {
+        String filter = String.format(
+                "user_id == '%s' && file_path == '%s'", 
+                userId, 
+                filePath
+        );
+        // Spring AI 的 delete 方法通常接受 ID 列表，但在某些实现中可能支持 filter
+        // 如果 VectorStore 接口不支持基于 filter 的删除，我们需要先搜索出 ID 再删除
+        // 这里假设我们需要先搜索 ID
+        try {
+            // 搜索该文件的所有 chunk (topK 设置大一些以覆盖所有 chunks)
+            // 注意: 这种方式有性能开销，但在 MVP 阶段是可接受的
+            SearchRequest request = SearchRequest.builder()
+                .query("") // 空查询
+                .topK(1000) // 假设一个文件不超过 1000 个 chunks
+                .similarityThreshold(0.0) // 匹配所有
+                .filterExpression(filter)
+                .build();
+            
+            List<Document> documents = vectorStore.similaritySearch(request);
+            if (!documents.isEmpty()) {
+                List<String> ids = documents.stream().map(Document::getId).collect(Collectors.toList());
+                vectorStore.delete(ids);
+                log.info("已清理旧文件数据: 用户={}, 文件={}, 删除条数={}", userId, filePath, ids.size());
+            }
+        } catch (Exception e) {
+            log.warn("清理旧文件数据失败 (可能是首次添加): {}", e.getMessage());
+        }
+    }
+
+    /**
      * 删除用户的所有知识
+66
      */
     public void deleteUserKnowledge(String userId) {
-        // Spring AI VectorStore 暂不支持批量删除,需要通过 Milvus SDK 直接操作
-        log.warn("Spring AI VectorStore 暂不完全支持删除操作");
+        String filter = String.format("user_id == '%s'", userId);
+        try {
+            // 搜索该用户的所有 chunk (topK 设置大一些以覆盖所有 chunks)
+            SearchRequest request = SearchRequest.builder()
+                .query("") // 空查询
+                .topK(10000) // 假设一个用户不超过 10000 个 chunks
+                .similarityThreshold(0.0) // 匹配所有
+                .filterExpression(filter)
+                .build();
+            
+            List<Document> documents = vectorStore.similaritySearch(request);
+            if (!documents.isEmpty()) {
+                List<String> ids = documents.stream().map(Document::getId).collect(Collectors.toList());
+                vectorStore.delete(ids);
+                log.info("已清理用户知识: 用户={}, 删除条数={}", userId, ids.size());
+            }
+        } catch (Exception e) {
+            log.warn("清理用户知识失败: {}", e.getMessage());
+        }
     }
 
     /**
      * 将 KnowledgeChunk 转换为 Spring AI Document
      */
     private Document convertToDocument(String userId, KnowledgeChunk chunk) {
-        return Document.builder()
-                .id(chunk.getId())
-                .text(chunk.getContent())
-                .metadata("user_id", userId)
-                .metadata("file_path", chunk.getFilePath())
-                .metadata("file_type", chunk.getFileType().name())
-                .metadata("language", chunk.getLanguage())
-                .metadata("start_line", chunk.getStartLine())
-                .metadata("end_line", chunk.getEndLine())
-                .metadata("created_at", chunk.getCreatedAt())
-                .build();
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("user_id", userId != null ? userId : "default");
+        metadata.put("file_path", chunk.getFilePath() != null ? chunk.getFilePath() : "unknown");
+        metadata.put("file_type", chunk.getFileType() != null ? chunk.getFileType().name() : "OTHER");
+        metadata.put("language", chunk.getLanguage() != null ? chunk.getLanguage() : "text");
+        metadata.put("start_line", chunk.getStartLine() != null ? chunk.getStartLine() : 0);
+        metadata.put("end_line", chunk.getEndLine() != null ? chunk.getEndLine() : 0);
+        metadata.put("created_at", chunk.getCreatedAt() != null ? chunk.getCreatedAt() : System.currentTimeMillis());
+        metadata.put("content_hash", chunk.getContentHash() != null ? chunk.getContentHash() : "");
+        metadata.put("chunk_index", chunk.getChunkIndex() != null ? chunk.getChunkIndex() : 0);
+
+        if (chunk.getMetadata() != null) {
+            chunk.getMetadata().forEach((k, v) -> {
+                if (v != null) {
+                    metadata.put("meta_" + k, v);
+                }
+            });
+        }
+
+        String content = chunk.getContent() != null ? chunk.getContent() : "";
+        return new Document(chunk.getId(), content, metadata);
     }
 }
 

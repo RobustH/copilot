@@ -1,6 +1,7 @@
 package com.alibaba.cloud.ai.copilot.knowledge.splitter;
 
-import com.alibaba.cloud.ai.copilot.knowledge.model.KnowledgeChunk;
+import com.alibaba.cloud.ai.copilot.knowledge.domain.vo.KnowledgeChunk;
+import com.alibaba.cloud.ai.copilot.knowledge.enums.SplitterStrategy;
 
 import java.util.List;
 

@@ -1,4 +1,4 @@
-package com.alibaba.cloud.ai.copilot.knowledge.model;
+package com.alibaba.cloud.ai.copilot.knowledge.enums;
 
 /**
  * 知识分类

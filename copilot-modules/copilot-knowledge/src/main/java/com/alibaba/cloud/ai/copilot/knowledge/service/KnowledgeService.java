@@ -1,10 +1,10 @@
 package com.alibaba.cloud.ai.copilot.knowledge.service;
 
-import com.alibaba.cloud.ai.copilot.knowledge.model.KnowledgeCategory;
-import com.alibaba.cloud.ai.copilot.knowledge.model.KnowledgeChunk;
+import com.alibaba.cloud.ai.copilot.knowledge.enums.KnowledgeCategory;
+import com.alibaba.cloud.ai.copilot.knowledge.domain.vo.KnowledgeChunk;
 import com.alibaba.cloud.ai.copilot.knowledge.splitter.DocumentSplitter;
 import com.alibaba.cloud.ai.copilot.knowledge.splitter.SplitterFactory;
-import com.alibaba.cloud.ai.copilot.knowledge.splitter.SplitterStrategy;
+import com.alibaba.cloud.ai.copilot.knowledge.enums.SplitterStrategy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
@@ -55,6 +55,14 @@ public class KnowledgeService {
         }
 
         List<KnowledgeChunk> chunks = processFile(file);
+        
+        // 增量更新策略 :
+        // 1. 先删除该文件在向量库中的所有旧 chunks
+        // 2. 再插入新的 chunks
+        // 注意：这里没有做细粒度的 hash 比对（chunk 级别），而是文件级别的全量替换
+        // 这种方式简单可靠，避免了复杂的差异计算
+        vectorStoreService.deleteKnowledgeByFilePath(userId, filePath);
+        
         return saveChunks(userId, chunks);
     }
 

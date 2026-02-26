@@ -45,20 +45,20 @@ public class KnowledgeContextHook extends MessagesModelHook {
     @Override
     public AgentCommand beforeModel(List<Message> previousMessages, RunnableConfig config) {
         try {
-            // 判断是否是首次用户请求
-            boolean isFirstUserRequest = previousMessages.stream()
-                    .noneMatch(msg -> msg instanceof AssistantMessage || msg instanceof ToolResponseMessage);
+            // 只跳过 ReactAgent 工具调用内部循环（最后一条消息是工具响应时）
+            // 允许多轮对话也能注入知识（不能因为有历史 AssistantMessage 就跳过）
+            boolean isToolCallLoop = !previousMessages.isEmpty() &&
+                    previousMessages.get(previousMessages.size() - 1) instanceof ToolResponseMessage;
 
-            if (!isFirstUserRequest) {
-                // ReactAgent 内部消息流,不干预
-                log.debug("ReactAgent 内部消息流,跳过知识上下文注入");
+            if (isToolCallLoop) {
+                log.debug("ReactAgent 工具调用内部循环,跳过知识上下文注入");
                 return new AgentCommand(previousMessages);
             }
 
             // 获取 userId
             String userId = getUserId(config);
             if (userId == null) {
-                log.debug("未找到 userId,跳过知识上下文注入");
+                log.warn("未找到 userId，跳过知识上下文注入");
                 return new AgentCommand(previousMessages);
             }
 
@@ -69,8 +69,10 @@ public class KnowledgeContextHook extends MessagesModelHook {
                 return new AgentCommand(previousMessages);
             }
 
+            log.info("开始知识库搜索: userId={}, query={}", userId, userQuery);
             // 搜索相关知识
             List<Document> knowledgeDocs = knowledgeService.search(userId, userQuery, MAX_RESULTS);
+            log.info("知识库搜索结果: userId={}, 结果数={}", userId, knowledgeDocs.size());
             if (knowledgeDocs.isEmpty()) {
                 log.debug("未找到相关知识,跳过上下文注入: query={}", userQuery);
                 return new AgentCommand(previousMessages);
@@ -108,20 +110,33 @@ public class KnowledgeContextHook extends MessagesModelHook {
      * 从配置中获取用户 ID
      */
     private String getUserId(RunnableConfig config) {
-        if (config == null) {
-            return null;
+        // 优先从 RunnableConfig.metadata 读取（官方文档方式）
+        // config.metadata("key") 返回 Optional<?>，直接 orElse 取值
+        if (config != null) {
+            try {
+                Object userIdObj = config.metadata("userId").orElse(null);
+                if (userIdObj != null) {
+                    log.info("从 RunnableConfig.metadata 获取到 userId: {}", userIdObj);
+                    return userIdObj.toString();
+                }
+            } catch (Exception e) {
+                log.warn("从 RunnableConfig 获取 userId 失败", e);
+            }
         }
 
+        // 降级：从 Sa-Token 当前请求线程获取
         try {
-            Object userIdObj = config.metadata("userId");
-            if (userIdObj instanceof java.util.Optional<?> optional) {
-                userIdObj = optional.orElse(null);
+            if (cn.dev33.satoken.stp.StpUtil.isLogin()) {
+                String userId = cn.dev33.satoken.stp.StpUtil.getLoginIdAsString();
+                log.info("从 Sa-Token 降级获取到 userId: {}", userId);
+                return userId;
             }
-            return userIdObj != null ? userIdObj.toString() : null;
         } catch (Exception e) {
-            log.warn("获取 userId 失败", e);
-            return null;
+            log.warn("无法从 Sa-Token 获取 userId", e);
         }
+
+        log.warn("无法获取 userId，知识库上下文注入将被跳过");
+        return null;
     }
 
     /**

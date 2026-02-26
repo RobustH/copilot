@@ -1,11 +1,11 @@
 package com.alibaba.cloud.ai.copilot.knowledge.splitter.impl;
 
+import com.alibaba.cloud.ai.copilot.knowledge.enums.SplitterStrategy;
 import com.alibaba.cloud.ai.copilot.knowledge.splitter.DocumentSplitter;
-import com.alibaba.cloud.ai.copilot.knowledge.splitter.SplitterStrategy;
 
-import com.alibaba.cloud.ai.copilot.knowledge.classifier.FileTypeClassifier;
-import com.alibaba.cloud.ai.copilot.knowledge.model.KnowledgeCategory;
-import com.alibaba.cloud.ai.copilot.knowledge.model.KnowledgeChunk;
+import com.alibaba.cloud.ai.copilot.knowledge.utils.FileTypeClassifier;
+import com.alibaba.cloud.ai.copilot.knowledge.enums.KnowledgeCategory;
+import com.alibaba.cloud.ai.copilot.knowledge.domain.vo.KnowledgeChunk;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
@@ -14,6 +14,7 @@ import org.springframework.ai.transformer.splitter.TokenTextSplitter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Component;
+import org.springframework.util.DigestUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -81,6 +82,9 @@ public class TokenDocumentSplitter implements DocumentSplitter {
                     .startLine(1)  // 待优化: 从 metadata 中提取行号
                     .endLine(1)    // 待优化: 从 metadata 中提取行号
                     .createdAt(System.currentTimeMillis())
+                    .contentHash(DigestUtils.md5DigestAsHex(doc.getText().getBytes()))
+                    .chunkIndex(i)
+                    .metadata(java.util.Collections.emptyMap())
                     .build();
             
             chunks.add(chunk);

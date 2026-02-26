@@ -1,6 +1,4 @@
-package com.alibaba.cloud.ai.copilot.knowledge.splitter;
-
-import com.alibaba.cloud.ai.copilot.knowledge.model.KnowledgeCategory;
+package com.alibaba.cloud.ai.copilot.knowledge.enums;
 
 /**
  * 切割策略枚举

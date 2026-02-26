@@ -1,10 +1,10 @@
 package com.alibaba.cloud.ai.copilot.knowledge.splitter.impl;
 
+import com.alibaba.cloud.ai.copilot.knowledge.enums.SplitterStrategy;
 import com.alibaba.cloud.ai.copilot.knowledge.splitter.DocumentSplitter;
-import com.alibaba.cloud.ai.copilot.knowledge.splitter.SplitterStrategy;
 
-import com.alibaba.cloud.ai.copilot.knowledge.model.KnowledgeCategory;
-import com.alibaba.cloud.ai.copilot.knowledge.model.KnowledgeChunk;
+import com.alibaba.cloud.ai.copilot.knowledge.enums.KnowledgeCategory;
+import com.alibaba.cloud.ai.copilot.knowledge.domain.vo.KnowledgeChunk;
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ParseResult;
 import com.github.javaparser.ast.CompilationUnit;
@@ -14,10 +14,12 @@ import com.github.javaparser.ast.body.TypeDeclaration;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.util.DigestUtils;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
@@ -71,18 +73,20 @@ public class JavaParserSplitter implements DocumentSplitter {
         String packageName = cu.getPackageDeclaration()
                 .map(pd -> pd.getNameAsString())
                 .orElse("");
+        
+        AtomicInteger indexCounter = new AtomicInteger(0);
 
         // 遍历所有顶层类型 (类, 接口, 枚举)
         for (TypeDeclaration<?> type : cu.getTypes()) {
             if (type instanceof ClassOrInterfaceDeclaration) {
-                visitClass((ClassOrInterfaceDeclaration) type, packageName, units);
+                visitClass((ClassOrInterfaceDeclaration) type, packageName, units, indexCounter);
             }
             // 以后可以扩展支持 Enum, Record 等
         }
         return units;
     }
 
-    private void visitClass(ClassOrInterfaceDeclaration classDecl, String packageName, List<CodeUnit> units) {
+    private void visitClass(ClassOrInterfaceDeclaration classDecl, String packageName, List<CodeUnit> units, AtomicInteger indexCounter) {
         String className = classDecl.getNameAsString();
         String context = packageName.isEmpty() ? "" : "package " + packageName;
 
@@ -95,7 +99,8 @@ public class JavaParserSplitter implements DocumentSplitter {
                     classSignature,
                     context,
                     classDecl.getBegin().map(p -> p.line).orElse(0),
-                    classDecl.getEnd().map(p -> p.line).orElse(0)
+                    classDecl.getEnd().map(p -> p.line).orElse(0),
+                    indexCounter.getAndIncrement()
             ));
         } catch (Exception e) {
             log.warn("提取类签名失败", e);
@@ -110,7 +115,8 @@ public class JavaParserSplitter implements DocumentSplitter {
                     method.toString(), // 获取完整方法代码
                     classContext,
                     method.getBegin().map(p -> p.line).orElse(0),
-                    method.getEnd().map(p -> p.line).orElse(0)
+                    method.getEnd().map(p -> p.line).orElse(0),
+                    indexCounter.getAndIncrement()
             ));
         }
     }
@@ -151,7 +157,29 @@ public class JavaParserSplitter implements DocumentSplitter {
                 .startLine(unit.startLine)
                 .endLine(unit.endLine)
                 .createdAt(System.currentTimeMillis())
+                .contentHash(DigestUtils.md5DigestAsHex(sb.toString().getBytes()))
+                .chunkIndex(unit.index)
+                .metadata(createMetadata(unit))
                 .build();
+    }
+
+
+
+    private java.util.Map<String, Object> createMetadata(CodeUnit unit) {
+        java.util.Map<String, Object> metadata = new java.util.HashMap<>();
+        if (unit.type != null) {
+            metadata.put("symbolType", unit.type);
+        }
+        if (unit.name != null) {
+            metadata.put("symbolName", unit.name); // 冗余一份便于查看
+        }
+        if (unit.context != null) {
+            metadata.put("parentSymbol", unit.context);
+        }
+        // 对于 CLASS, method.toString() 提取出的签名作为 signature
+        // 对于 METHOD, method.toString() 是完整代码，这里不适合放 signature，需要另外提取
+        // 简单起见，暂时不放 signature，或者在 CodeUnit 中增加 signature 字段
+        return metadata;
     }
 
     // 内部记录类
@@ -161,6 +189,7 @@ public class JavaParserSplitter implements DocumentSplitter {
             String content,
             String context,
             int startLine,
-            int endLine
+            int endLine,
+            int index
     ) {}
 }

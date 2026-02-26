@@ -138,9 +138,10 @@ public class ChatServiceImpl implements ChatService {
 
             ReactAgent agent = agentBuilder.build();
 
-            // 7. 设置会话ID到上下文（供 Hook 和 Interceptor 使用）
+            // 7. 设置会话ID和用户ID到上下文（供 Hook 和 Interceptor 使用）
             RunnableConfig config = RunnableConfig.builder()
                 .addMetadata("conversationId", conversationId)
+                .addMetadata("userId", userId)  // 添加 userId，供 KnowledgeContextHook 使用
                 .build();
 
             // 8. 保存用户消息到数据库

@@ -1,9 +1,13 @@
-package com.alibaba.cloud.ai.copilot.knowledge.model;
+package com.alibaba.cloud.ai.copilot.knowledge.domain.vo;
+
+import com.alibaba.cloud.ai.copilot.knowledge.enums.KnowledgeCategory;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+
+import java.util.Map;
 
 /**
  * 知识块模型
@@ -60,6 +64,21 @@ public class KnowledgeChunk {
      * 结束行号
      */
     private Integer endLine;
+
+    /**
+     * 增量索引: 内容的 SHA-256 哈希
+     */
+    private String contentHash;
+
+    /**
+     * 排序: Chunk 在文件中的索引位置
+     */
+    private Integer chunkIndex;
+
+    /**
+     * 扩展元数据: 存储 symbolType, signature 等
+     */
+    private Map<String, Object> metadata;
 
     /**
      * 创建时间

@@ -2,6 +2,8 @@ package com.alibaba.cloud.ai.copilot.tools;
 
 import com.alibaba.cloud.ai.copilot.knowledge.service.KnowledgeService;
 import com.alibaba.cloud.ai.copilot.service.mcp.BuiltinToolProvider;
+import cn.dev33.satoken.stp.StpUtil;
+import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,10 +31,13 @@ public class SearchKnowledgeTool
     private final KnowledgeService knowledgeService;
 
     public static final String DESCRIPTION =
-            "Search the user's knowledge base for relevant code and documents. " +
+            "Search the user's knowledge base (codebase and documents) for relevant information. " +
             "Returns matching code snippets, documentation, and file references based on semantic similarity. " +
             "Use this when you need to find specific information in the user's project, " +
-            "such as code examples, configuration files, or documentation. " +
+            "such as code examples, configuration files, class definitions, or documentation. " +
+            "IMPORTANT: The 'query' parameter should describe WHAT you are looking for semantically " +
+            "(e.g. 'project introduction', 'user authentication implementation', 'database configuration'), " +
+            "NOT include user IDs, folder names, or system identifiers. " +
             "Parameters: query (required), file_type (optional: CODE/DOCUMENT/CONFIG), top_k (optional, default 5).";
 
     @Override
@@ -96,14 +101,36 @@ public class SearchKnowledgeTool
     }
 
     private String getUserId(ToolContext toolContext) {
+        // 调试：打印所有 key，确认 RunnableConfig 的实际注入 key
+        log.info("ToolContext keys: {}", toolContext.getContext().keySet());
+
+        // ReactAgent 可能以不同的 key 注入 RunnableConfig，逐一尝试
+        String[] configKeys = {"_AGENT_CONFIG_", "config", "runnableConfig", "agentConfig"};
+        for (String key : configKeys) {
+            try {
+                Object obj = toolContext.getContext().get(key);
+                if (obj instanceof com.alibaba.cloud.ai.graph.RunnableConfig runnableConfig) {
+                    Object userIdObj = runnableConfig.metadata("userId").orElse(null);
+                    if (userIdObj != null) {
+                        log.info("从 ToolContext[{}].metadata(userId) 获取到 userId: {}", key, userIdObj);
+                        return userIdObj.toString();
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+
+        // 降级：直接从 Sa-Token 当前会话获取
         try {
-            Object userIdObj = toolContext.getContext().get("userId");
-            if (userIdObj != null) {
-                return userIdObj.toString();
+            if (StpUtil.isLogin()) {
+                String userId = StpUtil.getLoginIdAsString();
+                log.info("从 Sa-Token 降级获取到 userId: {}", userId);
+                return userId;
             }
         } catch (Exception e) {
-            log.warn("无法从 ToolContext 获取 userId", e);
+            log.warn("无法从 Sa-Token 获取 userId", e);
         }
+
+        log.warn("无法获取 userId，ToolContext 内容: {}", toolContext.getContext());
         return null;
     }
 

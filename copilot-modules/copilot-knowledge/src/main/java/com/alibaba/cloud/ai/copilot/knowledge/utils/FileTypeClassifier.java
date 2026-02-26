@@ -1,6 +1,6 @@
-package com.alibaba.cloud.ai.copilot.knowledge.classifier;
+package com.alibaba.cloud.ai.copilot.knowledge.utils;
 
-import com.alibaba.cloud.ai.copilot.knowledge.model.KnowledgeCategory;
+import com.alibaba.cloud.ai.copilot.knowledge.enums.KnowledgeCategory;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;

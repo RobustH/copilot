@@ -8,6 +8,7 @@ import org.springframework.ai.embedding.EmbeddingModel;
 
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.vectorstore.milvus.MilvusVectorStore;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -60,7 +61,8 @@ public class MilvusVectorStoreConfig {
      * 创建 Milvus VectorStore
      */
     @Bean
-    public VectorStore vectorStore(MilvusServiceClient milvusClient, EmbeddingModel embeddingModel) {
+    public VectorStore vectorStore(MilvusServiceClient milvusClient, 
+                                   @Qualifier("openAiEmbeddingModel") EmbeddingModel embeddingModel) {
         // 不指定索引类型,使用 Spring AI 默认配置
         MilvusVectorStore vectorStore = MilvusVectorStore.builder(milvusClient, embeddingModel)
                 .collectionName(collectionName)
