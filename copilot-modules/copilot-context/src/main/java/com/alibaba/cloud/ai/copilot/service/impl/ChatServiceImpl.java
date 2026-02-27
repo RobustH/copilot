@@ -8,7 +8,9 @@ import com.alibaba.cloud.ai.copilot.domain.entity.McpToolInfo;
 import com.alibaba.cloud.ai.copilot.handler.OutputHandlerRegistry;
 import com.alibaba.cloud.ai.copilot.hook.ConversationHistoryHook;
 import com.alibaba.cloud.ai.copilot.hook.ConversationSaveHook;
+import com.alibaba.cloud.ai.copilot.hook.LongTermMemoryHook;
 import com.alibaba.cloud.ai.copilot.interceptor.DynamicSystemPromptInterceptor;
+import com.alibaba.cloud.ai.copilot.store.DatabaseStore;
 import com.alibaba.cloud.ai.copilot.mapper.ChatMessageMapper;
 import com.alibaba.cloud.ai.copilot.mapper.McpToolInfoMapper;
 import com.alibaba.cloud.ai.copilot.mapper.ModelConfigMapper;
@@ -67,7 +69,9 @@ public class ChatServiceImpl implements ChatService {
     private final McpClientManager mcpClientManager;
     private final BuiltinToolRegistry builtinToolRegistry;
     private final McpToolInfoMapper mcpToolInfoMapper;
-    private final com.alibaba.cloud.ai.copilot.knowledge.service.KnowledgeAvailabilityChecker knowledgeAvailabilityChecker;
+    private final DatabaseStore databaseStore;
+    private final LongTermMemoryHook longTermMemoryHook;
+    private final KnowledgeAvailabilityChecker knowledgeAvailabilityChecker;
 
     @Override
     public void handleBuilderMode(ChatRequest request, String userId, SseEmitter emitter) {
@@ -117,6 +121,11 @@ public class ChatServiceImpl implements ChatService {
             // 改进：只保存工具调用完成后的最终文本响应
             hooks.add(conversationSaveHook);
 
+            // 4.4 长期记忆 Hook（加载用户画像和学习偏好）
+            if (appProperties.getMemory().isEnabled()) {
+                hooks.add(longTermMemoryHook);
+            }
+
             // 5. 构建 Interceptors
             List<ModelInterceptor> interceptors = new ArrayList<>();
 
@@ -129,6 +138,7 @@ public class ChatServiceImpl implements ChatService {
                 allTools.removeIf(t -> "search_knowledge".equals(t.getToolDefinition().name()));
                 log.info("向量数据库不可用，已移除 search_knowledge 工具");
             }
+
             log.info("共加载 {} 个工具", allTools.size());
 
             // 6.3 构建 Agent
@@ -143,9 +153,33 @@ public class ChatServiceImpl implements ChatService {
 
             ReactAgent agent = agentBuilder.build();
 
+            // 7. 设置会话ID到上下文（供 Hook 和 Interceptor 使用）
+            Long userIdLong = LoginHelper.getUserId();
+            RunnableConfig.Builder configBuilder = RunnableConfig.builder()
             // 7. 设置会话ID和用户ID到上下文（供 Hook 和 Interceptor 使用）
             RunnableConfig config = RunnableConfig.builder()
                 .addMetadata("conversationId", conversationId)
+                .addMetadata("user_id", String.valueOf(userIdLong))
+                // 供 LongTermMemoryHook 兜底 LLM 结构化抽取时优先使用当前会话同一个模型配置
+                .addMetadata("model_config_id", request.getModelConfigId());
+
+            // 设置偏好相关开关
+            boolean enablePreferences = request.getEnablePreferences() != null
+                ? request.getEnablePreferences()
+                : true; // 默认启用
+            boolean enablePreferenceLearning = request.getEnablePreferenceLearning() != null
+                ? request.getEnablePreferenceLearning()
+                : true; // 默认启用
+
+            configBuilder.addMetadata("enable_preferences", String.valueOf(enablePreferences));
+            configBuilder.addMetadata("enable_preference_learning", String.valueOf(enablePreferenceLearning));
+
+            // 设置长期记忆存储（如果启用）
+            if (appProperties.getMemory().isEnabled()) {
+                configBuilder.store(databaseStore);
+            }
+
+            RunnableConfig config = configBuilder.build();
                 .addMetadata("userId", userId)  // 添加 userId，供 KnowledgeContextHook 使用
                 .build();
 
@@ -191,7 +225,7 @@ public class ChatServiceImpl implements ChatService {
                 },
                 () -> {
                     // 流完成后，更新会话标题（基于首条用户消息）
-                    updateConversationTitleIfNeeded(finalConversationId, userMessageContent);
+                    updateConversationTitleIfNeeded(finalConversationId, userMessageContent, userIdLong);
                     sseEventService.sendComplete(emitter);
                 }
             );
@@ -207,8 +241,6 @@ public class ChatServiceImpl implements ChatService {
 
     /**
      * 加载工具
-     *
-     * @return
      */
     private List<ToolCallback> loadToolCallback() {
         LambdaQueryWrapper<McpToolInfo> queryWrapper = new LambdaQueryWrapper<>();
@@ -251,18 +283,25 @@ public class ChatServiceImpl implements ChatService {
     /**
      * 更新会话标题（如果是新会话且标题为默认值）
      */
-    private void updateConversationTitleIfNeeded(String conversationId, String firstMessage) {
+    private void updateConversationTitleIfNeeded(String conversationId, String firstMessage, Long userId) {
         try {
             var conversation = conversationService.getConversation(conversationId);
             if (conversation != null &&
                     ("新对话".equals(conversation.getTitle()) || conversation.getTitle() == null)) {
                 // 生成标题（取前50个字符）
                 String title = firstMessage.length() > 50
-                        ? firstMessage.substring(0, 50) + "..."
-                        : firstMessage;
-                conversationService.updateConversationTitle(conversationId, title);
+                    ? firstMessage.substring(0, 50) + "..."
+                    : firstMessage;
+                if (userId == null) {
+                    log.debug("跳过更新会话标题：userId 为空: conversationId={}", conversationId);
+                    return;
+                }
+                conversationService.updateConversationTitle(conversationId, title, userId);
                 log.debug("更新会话标题: conversationId={}, title={}", conversationId, title);
             }
+        } catch (IllegalArgumentException e) {
+            // 常见原因：异步线程下无法获取/传递正确的登录上下文，或会话不属于当前用户
+            log.warn("更新会话标题被拒绝: conversationId={}, reason={}", conversationId, e.getMessage());
         } catch (Exception e) {
             log.error("更新会话标题失败: conversationId={}", conversationId, e);
         }
