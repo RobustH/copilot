@@ -104,7 +104,7 @@ public class CodebaseIndexer {
         // 3. 处理被删除的文件 (Database 中有但 filesystem 中没有的)
         try {
             // 获取数据库中所有的文件状态
-            // 注意: 对于大型项目，应该分批处理或只查询路径。这里 MVP 直接全量查询
+            // 注意: 对于大型项目，应该分批处理或只查询路径。
             // 获取数据库中该用户的所有文件状态
             QueryWrapper<FileIndexState> allStatesQuery = new QueryWrapper<>();
             allStatesQuery.eq("user_id", userId);

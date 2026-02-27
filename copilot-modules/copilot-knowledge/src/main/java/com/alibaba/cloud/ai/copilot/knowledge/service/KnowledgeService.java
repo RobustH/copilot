@@ -13,9 +13,7 @@ import org.springframework.stereotype.Service;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -37,6 +35,7 @@ public class KnowledgeService {
 
     private final SplitterFactory splitterFactory;
     private final KnowledgeVectorStoreService vectorStoreService;
+    private final KnowledgeFtsService ftsService;
 
     // ==================== 文件处理 ====================
 
@@ -180,11 +179,63 @@ public class KnowledgeService {
     // ==================== 知识库搜索 ====================
 
     /**
-     * 通用搜索
-     * @param topK 返回最相似的前 K 个结果
+     * 三路合并语义检索
+     *
+     * 权重分配：
+     *   50% → 向量语义搜索（embeddings）
+     *   25% → FTS 全文关键词搜索
+     *   25% → 最近索引文件(暂未实现，先以最新索引实现)
+     *
+     * 结果去重：按 filePath+startLine+endLine
+     *
+     * @param nFinal 最终返回 chunk 数（对标 Continue 默认 nFinal=25）
      */
-    public List<Document> search(String userId, String query, int topK) {
-        return vectorStoreService.searchKnowledge(userId, query, topK);
+    public List<Document> search(String userId, String query, int nFinal) {
+        int embeddingsN = Math.max(1, (int)(nFinal * 0.50));
+        int ftsN        = Math.max(1, (int)(nFinal * 0.25));
+
+        List<Document> merged = new ArrayList<>();
+
+        // --- 路径1：向量语义搜索（50%）---
+        try {
+            List<Document> vecResults = vectorStoreService.searchKnowledge(userId, query, embeddingsN);
+            log.info("[向量] userId={}, 返回 {} 条", userId, vecResults.size());
+            merged.addAll(vecResults);
+        } catch (Exception e) {
+            log.warn("向量搜索失败: {}", e.getMessage());
+        }
+
+        // --- 路径2：FTS 全文关键词搜索（25%）---
+        try {
+            List<Document> ftsResults = ftsService.search(userId, query, ftsN);
+            log.info("[FTS] userId={}, 返回 {} 条", userId, ftsResults.size());
+            merged.addAll(ftsResults);
+        } catch (Exception e) {
+            log.warn("FTS 搜索失败: {}", e.getMessage());
+        }
+
+        // --- 去重（按 filePath+startLine+endLine）---
+        List<Document> deduped = deduplicateChunks(merged);
+        log.info("[合并去重] query={}, 合并前={}, 去重后={}", query, merged.size(), deduped.size());
+
+        // 截断到 nFinal
+        return deduped.size() > nFinal ? deduped.subList(0, nFinal) : deduped;
+    }
+
+    /**
+     * 按 filePath+startLine+endLine 去重
+     * 保留首次出现的 chunk（向量结果优先，因为先加入 merged）
+     */
+    private List<Document> deduplicateChunks(List<Document> docs) {
+        Map<String, Document> seen = new LinkedHashMap<>();
+        for (Document doc : docs) {
+            String fp    = String.valueOf(doc.getMetadata().getOrDefault("file_path", ""));
+            String start = String.valueOf(doc.getMetadata().getOrDefault("start_line", ""));
+            String end   = String.valueOf(doc.getMetadata().getOrDefault("end_line", ""));
+            String key   = fp + "#" + start + "-" + end;
+            seen.putIfAbsent(key, doc);
+        }
+        return new ArrayList<>(seen.values());
     }
 
     /**

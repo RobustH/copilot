@@ -67,6 +67,7 @@ public class ChatServiceImpl implements ChatService {
     private final McpClientManager mcpClientManager;
     private final BuiltinToolRegistry builtinToolRegistry;
     private final McpToolInfoMapper mcpToolInfoMapper;
+    private final com.alibaba.cloud.ai.copilot.knowledge.service.KnowledgeAvailabilityChecker knowledgeAvailabilityChecker;
 
     @Override
     public void handleBuilderMode(ChatRequest request, String userId, SseEmitter emitter) {
@@ -122,8 +123,12 @@ public class ChatServiceImpl implements ChatService {
             // 5.1 动态系统提示
             interceptors.add(dynamicSystemPromptInterceptor);
 
-            // 6. 加载工具
+            // 6. 加载工具（Milvus 不可用时过滤掉 search_knowledge）
             List<ToolCallback> allTools = loadToolCallback();
+            if (!knowledgeAvailabilityChecker.isAvailable()) {
+                allTools.removeIf(t -> "search_knowledge".equals(t.getToolDefinition().name()));
+                log.info("向量数据库不可用，已移除 search_knowledge 工具");
+            }
             log.info("共加载 {} 个工具", allTools.size());
 
             // 6.3 构建 Agent

@@ -2,6 +2,7 @@ package com.alibaba.cloud.ai.copilot.knowledge.service;
 
 import com.alibaba.cloud.ai.copilot.knowledge.enums.KnowledgeCategory;
 import com.alibaba.cloud.ai.copilot.knowledge.domain.vo.KnowledgeChunk;
+import com.alibaba.cloud.ai.copilot.knowledge.service.KnowledgeFtsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
@@ -26,6 +27,7 @@ import java.util.stream.Collectors;
 public class KnowledgeVectorStoreService {
 
     private final VectorStore vectorStore;
+    private final KnowledgeFtsService ftsService;
 
     /**
      * 添加知识块到向量库
@@ -33,6 +35,7 @@ public class KnowledgeVectorStoreService {
     public void addKnowledge(String userId, KnowledgeChunk chunk) {
         Document document = convertToDocument(userId, chunk);
         vectorStore.add(List.of(document));
+        ftsService.addBatch(userId, List.of(chunk));
         log.info("已添加知识块: 用户ID={}, 文件路径={}", userId, chunk.getFilePath());
     }
 
@@ -43,9 +46,9 @@ public class KnowledgeVectorStoreService {
         List<Document> documents = chunks.stream()
                 .map(chunk -> convertToDocument(userId, chunk))
                 .collect(Collectors.toList());
-        
         vectorStore.add(documents);
-        log.info("已批量添加 {} 个知识块, 用户: {}", chunks.size(), userId);
+        ftsService.addBatch(userId, chunks);  // 同步写入 FTS
+        log.info("已批量添加 {} 个知识块（向量+FTS）, 用户: {}", chunks.size(), userId);
     }
 
     /**
@@ -56,12 +59,12 @@ public class KnowledgeVectorStoreService {
         SearchRequest request = SearchRequest.builder()
                 .query(query)
                 .topK(topK)
-                .similarityThreshold(0.3)
+                .similarityThresholdAll()   // 不做阈值过滤，数据隔离由 user_id filter 保证
                 .filterExpression(String.format("user_id == '%s'", userId))
                 .build();
 
         List<Document> results = vectorStore.similaritySearch(request);
-        log.info("向量搜索结束: userId={}, 返回{}=条结果", userId, results.size());
+        log.info("向量搜索结束: userId={}, 返回 {} 条结果", userId, results.size());
         return results;
     }
 
@@ -83,7 +86,7 @@ public class KnowledgeVectorStoreService {
         SearchRequest request = SearchRequest.builder()
                 .query(query)
                 .topK(topK)
-                .similarityThreshold(0.5)  // 降低阈值以提高召回率
+                .similarityThresholdAll()   // 不做阈值过滤
                 .filterExpression(filter)
                 .build();
 
@@ -116,6 +119,7 @@ public class KnowledgeVectorStoreService {
             if (!documents.isEmpty()) {
                 List<String> ids = documents.stream().map(Document::getId).collect(Collectors.toList());
                 vectorStore.delete(ids);
+                ftsService.deleteByFilePath(userId, filePath);  // 同步清 FTS
                 log.info("已清理旧文件数据: 用户={}, 文件={}, 删除条数={}", userId, filePath, ids.size());
             }
         } catch (Exception e) {
@@ -142,6 +146,7 @@ public class KnowledgeVectorStoreService {
             if (!documents.isEmpty()) {
                 List<String> ids = documents.stream().map(Document::getId).collect(Collectors.toList());
                 vectorStore.delete(ids);
+                ftsService.deleteByUserId(userId);  // 同步清 FTS
                 log.info("已清理用户知识: 用户={}, 删除条数={}", userId, ids.size());
             }
         } catch (Exception e) {
@@ -150,7 +155,9 @@ public class KnowledgeVectorStoreService {
     }
 
     /**
-     * 将 KnowledgeChunk 转换为 Spring AI Document
+     * 将 KnowledgeChunk 转换为 Spring AI Document。
+     * 在内容前追加中文语义描述头（类 Continue 的 context augmentation），
+     * 解决中文查询 vs 英文代码的跨语言语义鸿沟。
      */
     private Document convertToDocument(String userId, KnowledgeChunk chunk) {
         Map<String, Object> metadata = new HashMap<>();
@@ -172,8 +179,62 @@ public class KnowledgeVectorStoreService {
             });
         }
 
-        String content = chunk.getContent() != null ? chunk.getContent() : "";
-        return new Document(chunk.getId(), content, metadata);
+        // 构建带有中文语义描述头的 content，提升跨语言召回率
+        String rawContent = chunk.getContent() != null ? chunk.getContent() : "";
+        String enrichedContent = buildEnrichedContent(chunk, rawContent);
+
+        return new Document(chunk.getId(), enrichedContent, metadata);
+    }
+
+    /**
+     * 在原始代码内容前拼接自然语言描述头。
+     * 示例：
+     *   文件: StudentNotFoundException.java | 类型: 异常类 | 符号: StudentNotFoundException
+     *   [原始代码...]
+     */
+    private String buildEnrichedContent(KnowledgeChunk chunk, String rawContent) {
+        StringBuilder prefix = new StringBuilder();
+
+        // 文件路径（取文件名）
+        if (chunk.getFilePath() != null) {
+            String fileName = chunk.getFilePath().replaceAll(".*[/\\\\]", "");
+            prefix.append("文件: ").append(fileName);
+        }
+
+        // 符号类型中文描述
+        Map<String, Object> meta = chunk.getMetadata();
+        if (meta != null) {
+            Object symbolType = meta.get("symbolType");
+            Object symbolName = meta.get("symbolName");
+            Object parentSymbol = meta.get("parentSymbol");
+
+            if (symbolType != null) {
+                String typeDesc = toChineseSymbolType(symbolType.toString());
+                prefix.append(" | 类型: ").append(typeDesc);
+            }
+            if (symbolName != null) {
+                prefix.append(" | 符号: ").append(symbolName);
+            }
+            if (parentSymbol != null) {
+                prefix.append(" | 所属: ").append(parentSymbol);
+            }
+        }
+
+        if (prefix.length() > 0) {
+            return prefix + "\n" + rawContent;
+        }
+        return rawContent;
+    }
+
+    private String toChineseSymbolType(String symbolType) {
+        return switch (symbolType.toUpperCase()) {
+            case "CLASS" -> "类";
+            case "INTERFACE" -> "接口";
+            case "METHOD" -> "方法";
+            case "FIELD" -> "字段";
+            case "ENUM" -> "枚举";
+            case "ANNOTATION" -> "注解";
+            default -> symbolType;
+        };
     }
 }
-

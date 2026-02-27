@@ -1,6 +1,7 @@
 package com.alibaba.cloud.ai.copilot.hook;
 
 import com.alibaba.cloud.ai.copilot.knowledge.service.KnowledgeService;
+import com.alibaba.cloud.ai.copilot.knowledge.service.KnowledgeAvailabilityChecker;
 import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.alibaba.cloud.ai.graph.agent.hook.HookPosition;
 import com.alibaba.cloud.ai.graph.agent.hook.HookPositions;
@@ -33,6 +34,7 @@ import java.util.List;
 public class KnowledgeContextHook extends MessagesModelHook {
 
     private final KnowledgeService knowledgeService;
+    private final KnowledgeAvailabilityChecker availabilityChecker;
 
     private static final int MAX_RESULTS = 3;  // 最多注入 3 条知识
     private static final int MIN_QUERY_LENGTH = 5;  // 最小查询长度
@@ -45,6 +47,12 @@ public class KnowledgeContextHook extends MessagesModelHook {
     @Override
     public AgentCommand beforeModel(List<Message> previousMessages, RunnableConfig config) {
         try {
+            // Milvus 不可用时直接跳过，不干预消息流
+            if (!availabilityChecker.isAvailable()) {
+                log.debug("向量数据库不可用，跳过知识上下文注入");
+                return new AgentCommand(previousMessages);
+            }
+
             // 只跳过 ReactAgent 工具调用内部循环（最后一条消息是工具响应时）
             // 允许多轮对话也能注入知识（不能因为有历史 AssistantMessage 就跳过）
             boolean isToolCallLoop = !previousMessages.isEmpty() &&

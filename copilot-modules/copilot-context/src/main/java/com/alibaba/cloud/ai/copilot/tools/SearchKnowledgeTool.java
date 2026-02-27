@@ -109,7 +109,7 @@ public class SearchKnowledgeTool
         for (String key : configKeys) {
             try {
                 Object obj = toolContext.getContext().get(key);
-                if (obj instanceof com.alibaba.cloud.ai.graph.RunnableConfig runnableConfig) {
+                if (obj instanceof RunnableConfig runnableConfig) {
                     Object userIdObj = runnableConfig.metadata("userId").orElse(null);
                     if (userIdObj != null) {
                         log.info("从 ToolContext[{}].metadata(userId) 获取到 userId: {}", key, userIdObj);
